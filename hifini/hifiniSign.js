@@ -1,102 +1,240 @@
 /*
-微博超话签到-lowking-v1.5(原作者NavePnow，因为通知太多进行修改，同时重构了代码)
+hifini签到-lowking-v1.0
 
-⚠️使用方法：按下面的配置完之后打开超话页面，点击签到按钮获取cookie
-
-⚠️注：获取完cookie记得把脚本禁用
+按下面配置完之后，打开https://www.hifini.com/my.htm获取cookie
 
 ************************
 Surge 4.2.0+ 脚本配置(其他APP自行转换配置):
 ************************
-
 [Script]
-# > 微博超话签到
-微博超话获取cookie = type=http-request,pattern=https:\/\/weibo\.com\/p\/aj\/general\/button\?ajwvr=6&api=http:\/\/i\.huati\.weibo\.com\/aj\/super\/checkin,script-path=weiboSTCookie.js
-微博超话签到 = type=cron,cronexp="0 0 0,1 * * ?",wake-system=1,script-path=weiboST.js
+# > hifini签到
+hifini签到cookie = type=http-request,pattern=https:\/\/www.hifini.com\/my.htm,script-path=https://raw.githubusercontent.com/lowking/Scripts/master/hifini/hifiniSign.js
+hifini签到 = type=cron,cronexp="0 10 0 * * ?",wake-system=1,script-path=https://raw.githubusercontent.com/lowking/Scripts/master/hifini/hifiniSign.js
 
-[Header Rewrite]
-#超话页面强制用pc模式打开
-^https?://weibo\.com/p/[0-9] header-replace User-Agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.0.2 Safari/605.1.15"
-
-[mitm] 
-hostname = weibo.com
+[MITM]
+hostname = %APPEND% *.hifini.com
 */
-const signHeaderKey = 'lkWeiboSTSignHeaderKey'
-const lk = new ToolKit(`微博超话签到`, `WeiboSTSign`)
-const isEnableLog = JSON.parse(lk.getVal('lkIsEnableLogWeiboST', true))
-const isClearCookie = JSON.parse(lk.getVal('lkIsClearCookie', false))
-const userFollowSTKey = `lkUserFollowSTKey`
-var accounts = JSON.parse(lk.getVal(userFollowSTKey, false))
-
+const lk = new ToolKit(`hifini签到`, `HifiniSignIn`)
+const hifiniCookieKey = 'lkHifiniCookieKey'
+const hifiniIsTakeTheFirst = 'lkHifiniIsTakeTheFirst'
+const hifiniTakeTheFirstCount = 'lkHifiniTakeTheFirstCount'
+const hifiniRunType = 'lkHifiniRunType'
+const hifiniSec = 'lkHifiniSec'
+const hifiniMsec = 'lkHifiniMsec'
+const timeIntervalKey = 'lkHifiniTimeInterval'
+const hifiniCookie = lk.getVal(hifiniCookieKey, '')
+const isTakeTheFirst = JSON.parse(lk.getVal(hifiniIsTakeTheFirst, false))
+const takeTheFirstCount = lk.getVal(hifiniTakeTheFirstCount, 20)
+const runType = lk.getVal(hifiniRunType, "1")
+const sec = lk.getVal(hifiniSec, 59)
+const msec = lk.getVal(hifiniMsec, 0)
+const timeInterval = lk.getVal(timeIntervalKey, 100)
 
 if (!lk.isExecComm) {
-    !(async () => {
-        lk.boxJsJsonBuilder()
-        let cookie = lk.getVal(signHeaderKey)
-        //校验cookie
-        lk.log(lk.getVal(userFollowSTKey))
-        if (!cookie || isClearCookie || !accounts) {
-            lk.execFail()
-            lk.setVal(signHeaderKey, ``)
-            lk.appendNotifyInfo(isClearCookie ? `手动清除cookie` : `未获取到cookie或关注列表，请重新获取❌`)
-        } else {
-            await signIn(); //签到
-        }
-        lk.msg(``)
+    if (lk.isRequest()) {
+        getCookie()
         lk.done()
-    })()
+    } else {
+        // 构建boxjs数据写入订阅
+        lk.boxJsJsonBuilder({
+            "icons": [
+                "https://raw.githubusercontent.com/lowking/Scripts/master/doc/icon/hifinisignin-dark.png",
+                "https://raw.githubusercontent.com/lowking/Scripts/master/doc/icon/hifinisignin.png"
+            ],
+            "settings": [
+                {
+                    "id": hifiniCookieKey,
+                    "name": "hifini cookie",
+                    "val": "",
+                    "type": "text",
+                    "desc": "hifini cookie"
+                }, {
+                    "id": hifiniIsTakeTheFirst,
+                    "name": "是否抢签到第一",
+                    "val": false,
+                    "type": "boolean",
+                    "desc": "默认关闭"
+                }, {
+                    "id": hifiniTakeTheFirstCount,
+                    "name": "抢签到第一并发数",
+                    "val": 20,
+                    "type": "number",
+                    "desc": "默认20"
+                }, {
+                    "id": hifiniSec,
+                    "name": "抢签到等待至xx秒",
+                    "val": 59,
+                    "type": "number",
+                    "desc": "默认59s"
+                }, {
+                    "id": hifiniMsec,
+                    "name": "抢签到等待至xxx毫秒",
+                    "val": 0,
+                    "type": "number",
+                    "desc": "默认0ms"
+                }, {
+                    "id": timeIntervalKey,
+                    "name": "设定固定时间间隔",
+                    "val": 100,
+                    "type": "number",
+                    "desc": "默认100ms"
+                }, {
+                    "id": hifiniRunType,
+                    "name": "运行脚本方式",
+                    "val": "1",
+                    "type": "radios",
+                    "items": [
+                        {
+                            "key": "1",
+                            "label": "并发执行"
+                        },
+                        {
+                            "key": "2",
+                            "label": "顺序执行"
+                        },
+                        {
+                            "key": "3",
+                            "label": "固定时间间隔顺序执行"
+                        }
+                    ],
+                    "desc": "默认并发执行"
+                }
+            ],
+            "keys": [hifiniCookieKey]
+        }, {
+            "script_url": "https://github.com/lowking/Scripts/blob/master/hifini/hifiniSign.js",
+            "author": "@lowking",
+            "repo": "https://github.com/lowking/Scripts",
+        })
+        all()
+    }
+}
+
+function getCookie() {
+    if (lk.isGetCookie(/\/my.htm/)) {
+        if ($request.headers.hasOwnProperty('Cookie')) {
+            lk.setVal(hifiniCookieKey, $request.headers.Cookie)
+            lk.appendNotifyInfo('🎉成功获取hifini签到cookie，可以关闭相应脚本')
+        } else {
+            lk.appendNotifyInfo('❌获取hifini签到cookie失败')
+        }
+        lk.msg('')
+    }
+}
+
+async function all() {
+    if (hifiniCookie == '') {
+        lk.execFail()
+        lk.appendNotifyInfo(`⚠️请先先根据脚本注释获取cookie`)
+    } else {
+        let now = new Date()
+        if (isTakeTheFirst && now.getHours() == 23) {
+            // 如果时间是23点，就等待0点的时候再继续
+            if (now.getMinutes() > 57) {
+                while (1) {
+                    if (now.getHours() != 23 || (now.getSeconds() >= sec && now.getMilliseconds() >= msec)) {
+                        lk.log("跳出等待")
+                        break
+                    }
+                    lk.log("等待中。。。")
+                    await lk.sleep(100)
+                    now = new Date()
+                }
+            }
+            let execArr = []
+            // 尝试同时请求20次，抢签到第一
+            for (let i = 0; i < takeTheFirstCount; i++) {
+                if (runType == "1") {
+                    // 并发执行
+                    execArr.push(signIn())
+                } else if (runType == "2") {
+                    // 顺序执行
+                    let res = await signIn()
+                    if (res.indexOf("suc") > -1) {
+                        lk.execStatus = true
+                        lk.appendNotifyInfo([res.substring(3)], 1)
+                        break
+                    }
+                } else if (runType == "3") {
+                    // 固定间隔时间执行
+                    let finalTimeInterval = timeInterval * i
+                    execArr.push(new Promise((resolve, reject) => {
+                        setTimeout(async function () {
+                            resolve(await signIn())
+                        }, finalTimeInterval)
+                    }))
+                }
+            }
+            if (runType == "1" || runType == "3") {
+                await Promise.all(execArr).then(async (res) => {
+                    console.log(`${res}`)
+                    let sucList = res.filter(str => {
+                        return str !== undefined && str.indexOf("suc") != -1
+                    })
+                    // 只要有一个成功，就算成功
+                    if (sucList.length >= 1) {
+                        lk.execStatus = true
+                        // 获取返回排名最靠前的
+                        const regExp = new RegExp("排名(\\d+)", '')
+                        let m
+                        let min = 9999999
+                        let minStr = sucList[0].substring(3)
+                        sucList.forEach((info) => {
+                            if ((m = regExp.exec(info + "")) !== null) {
+                                let number = Number(m[1])
+                                if (number < min) {
+                                    min = number
+                                    minStr = info.substring(3)
+                                }
+                            }
+                        })
+                        lk.appendNotifyInfo([minStr], 1)
+                    } else {
+                        lk.execFail()
+                    }
+                })
+            }
+        } else {
+            await signIn()
+        }
+    }
+    lk.msg(``)
+    lk.done()
 }
 
 function signIn() {
-    return new Promise(async (resolve, reject) => {
-        for (let i in accounts) {
-            let name = accounts[i][0]
-            let super_id = accounts[i][1]
-            await superTalkSignIn(i, name, super_id)
-        }
-        resolve()
-    })
-}
-
-function superTalkSignIn(index, name, super_id) {
     return new Promise((resolve, reject) => {
-        let super_url = {
-            url: "https://weibo.com/p/aj/general/button?ajwvr=6&api=http://i.huati.weibo.com/aj/super/checkin&texta=%E7%AD%BE%E5%88%B0&textb=%E5%B7%B2%E7%AD%BE%E5%88%B0&status=0&id=" + super_id + "&location=page_100808_super_index&timezone=GMT+0800&lang=zh-cn&plat=MacIntel&ua=Mozilla/5.0%20(Macintosh;%20Intel%20Mac%20OS%20X%2010_15)%20AppleWebKit/605.1.15%20(KHTML,%20like%20Gecko)%20Version/13.0.4%20Safari/605.1.15&screen=375*812&__rnd=1576850070506",
+        lk.log("开始签到")
+        const t = '签到'
+        let url = {
+            url: 'https://www.hifini.com/sg_sign.htm',
             headers: {
-                Cookie: lk.getVal(signHeaderKey),
+                cookie: hifiniCookie,
                 "User-Agent": lk.userAgent
             }
         }
-        lk.get(super_url, (error, response, data) => {
-            lk.log(`\n${JSON.stringify(data)}`);
+        lk.post(url, (error, response, data) => {
             try {
                 if (error) {
                     lk.execFail()
-                    lk.appendNotifyInfo(`【${name}】超话签到错误！-${error}`)
+                    lk.appendNotifyInfo(`❌${t}失败，请稍后再试`)
                 } else {
-                    var obj = JSON.parse(data);
-                    var code = obj.code;
-                    var msg = obj.msg;
-                    if (code == 100003) { // 行为异常，需要重新验证
-                        lk.execFail()
-                        lk.appendNotifyInfo(`【${name}】超话签到❕${msg}${obj.data.location}`)
-                    } else if (code == 100000) {
-                        let tipMessage = obj.data.tipMessage;
-                        let alert_title = obj.data.alert_title;
-                        let alert_subtitle = obj.data.alert_subtitle;
-                        lk.appendNotifyInfo(`【${name}】超话签到成功🎉\n${alert_title}:${alert_subtitle}`)
-                    } else if (code == 382004) {
-                        msg = msg.replace("(382004)", "")
-                        lk.appendNotifyInfo(`【${name}】超话${msg} 🎉`)
+                    let msg = data.split(`<h4 class="card-title text-center mb-0">`)[1].split(`</i>`)[1].split("<")[0]
+                    if (msg) {
+                        lk.appendNotifyInfo(`🎉${msg.trim()}`)
+                        lk.log(msg.trim())
+                        resolve(`suc🎉${msg.trim()}`)
                     } else {
                         lk.execFail()
-                        lk.appendNotifyInfo(`【${name}】超话签到${msg}`)
+                        lk.appendNotifyInfo(data)
                     }
                 }
             } catch (e) {
                 lk.logErr(e)
+                lk.log(`返回数据：${data}`)
                 lk.execFail()
-                lk.appendNotifyInfo(`签到失败❌，请重新获取cookie！`)
+                lk.appendNotifyInfo(`❌${t}错误，请带上日志联系作者，或稍后再试`)
+                resolve(`fail`)
             } finally {
                 resolve()
             }

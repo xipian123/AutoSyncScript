@@ -1,102 +1,333 @@
 /*
-微博超话签到-lowking-v1.5(原作者NavePnow，因为通知太多进行修改，同时重构了代码)
+阿里云盘签到-lowking-v1.1.0
 
-⚠️使用方法：按下面的配置完之后打开超话页面，点击签到按钮获取cookie
-
-⚠️注：获取完cookie记得把脚本禁用
+按下面配置完之后，打开阿里云盘获取token（如获取不到，等一段时间再打开），下面配置只验证过surge的，其他的自行测试
+⚠️只测试过surge没有其他app自行测试
 
 ************************
 Surge 4.2.0+ 脚本配置(其他APP自行转换配置):
 ************************
 
 [Script]
-# > 微博超话签到
-微博超话获取cookie = type=http-request,pattern=https:\/\/weibo\.com\/p\/aj\/general\/button\?ajwvr=6&api=http:\/\/i\.huati\.weibo\.com\/aj\/super\/checkin,script-path=weiboSTCookie.js
-微博超话签到 = type=cron,cronexp="0 0 0,1 * * ?",wake-system=1,script-path=weiboST.js
+# > 阿里云盘签到
+https://auth.aliyundrive.com/v2/account/token
+阿里云盘签到cookie = requires-body=1,type=http-response,pattern=https:\/\/auth.aliyundrive.com\/v2\/account\/token,script-path=https://raw.githubusercontent.com/lowking/Scripts/master/ali/aliYunPanCheckIn.js
+阿里云盘签到 = type=cron,cronexp="0 10 0 * * ?",wake-system=1,script-path=https://raw.githubusercontent.com/lowking/Scripts/master/ali/aliYunPanCheckIn.js
 
-[Header Rewrite]
-#超话页面强制用pc模式打开
-^https?://weibo\.com/p/[0-9] header-replace User-Agent "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.0.2 Safari/605.1.15"
-
-[mitm] 
-hostname = weibo.com
+[MITM]
+hostname = %APPEND% auth.aliyundrive.com
 */
-const signHeaderKey = 'lkWeiboSTSignHeaderKey'
-const lk = new ToolKit(`微博超话签到`, `WeiboSTSign`)
-const isEnableLog = JSON.parse(lk.getVal('lkIsEnableLogWeiboST', true))
-const isClearCookie = JSON.parse(lk.getVal('lkIsClearCookie', false))
-const userFollowSTKey = `lkUserFollowSTKey`
-var accounts = JSON.parse(lk.getVal(userFollowSTKey, false))
+const lk = new ToolKit(`阿里云盘签到`, `AliYunPanCheckIn`, {"httpApi": "ffff@10.0.0.19:6166"})
+const aliYunPanTokenKey = 'lkAliYunPanTokenKey'
+let aliYunPanToken = lk.getVal(aliYunPanTokenKey, '')
+const aliYunPanRefreshTokenKey = 'lkAliYunPanRefreshTokenKey'
+let aliYunPanRefreshToken = lk.getVal(aliYunPanRefreshTokenKey, '')
+const checkSignInRepeatKey = 'aliYunPanSignInRepeat'
+const checkSignInRepeat = lk.getVal(checkSignInRepeatKey, '')
+const joinTeamRepeatKey = 'aliYunPanJoinTeamRepeat'
+const joinTeamRepeat = lk.getVal(joinTeamRepeatKey, -1)
+lk.userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 D/C501C6D2-FAF6-4DA8-B65B-7B8B392901EB"
 
-
-if (!lk.isExecComm) {
-    !(async () => {
-        lk.boxJsJsonBuilder()
-        let cookie = lk.getVal(signHeaderKey)
-        //校验cookie
-        lk.log(lk.getVal(userFollowSTKey))
-        if (!cookie || isClearCookie || !accounts) {
-            lk.execFail()
-            lk.setVal(signHeaderKey, ``)
-            lk.appendNotifyInfo(isClearCookie ? `手动清除cookie` : `未获取到cookie或关注列表，请重新获取❌`)
-        } else {
-            await signIn(); //签到
-        }
-        lk.msg(``)
+if(!lk.isExecComm) {
+    if (lk.isRequest()) {
+        getCookie()
         lk.done()
-    })()
+    } else {
+        lk.boxJsJsonBuilder({
+            "icons": [
+                "https://raw.githubusercontent.com/lowking/Scripts/master/doc/icon/aliYunPana.png",
+                "https://raw.githubusercontent.com/lowking/Scripts/master/doc/icon/aliYunPan.png"
+            ],
+            "settings": [
+                {
+                    "id": aliYunPanTokenKey,
+                    "name": "阿里云盘token",
+                    "val": "",
+                    "type": "text",
+                    "desc": "阿里云盘token"
+                }, {
+                    "id": aliYunPanRefreshTokenKey,
+                    "name": "阿里云盘refresh_token",
+                    "val": "",
+                    "type": "text",
+                    "desc": "阿里云盘refresh_token"
+                }
+            ],
+            "keys": [aliYunPanTokenKey, aliYunPanRefreshTokenKey]
+        }, {
+            "script_url": "https://github.com/lowking/Scripts/blob/master/ali/aliYunPanCheckIn.js",
+            "author": "@lowking",
+            "repo": "https://github.com/lowking/Scripts",
+        })
+        all()
+    }
 }
 
-function signIn() {
-    return new Promise(async (resolve, reject) => {
-        for (let i in accounts) {
-            let name = accounts[i][0]
-            let super_id = accounts[i][1]
-            await superTalkSignIn(i, name, super_id)
-        }
-        resolve()
-    })
-}
-
-function superTalkSignIn(index, name, super_id) {
-    return new Promise((resolve, reject) => {
-        let super_url = {
-            url: "https://weibo.com/p/aj/general/button?ajwvr=6&api=http://i.huati.weibo.com/aj/super/checkin&texta=%E7%AD%BE%E5%88%B0&textb=%E5%B7%B2%E7%AD%BE%E5%88%B0&status=0&id=" + super_id + "&location=page_100808_super_index&timezone=GMT+0800&lang=zh-cn&plat=MacIntel&ua=Mozilla/5.0%20(Macintosh;%20Intel%20Mac%20OS%20X%2010_15)%20AppleWebKit/605.1.15%20(KHTML,%20like%20Gecko)%20Version/13.0.4%20Safari/605.1.15&screen=375*812&__rnd=1576850070506",
-            headers: {
-                Cookie: lk.getVal(signHeaderKey),
-                "User-Agent": lk.userAgent
+function getCookie() {
+    if (lk.isGetCookie(/\/v2\/account\/token/)) {
+        lk.log(`开始获取cookie`)
+        let data = lk.getResponseBody()
+        // lk.log(`获取到的cookie：${data}`)
+        try {
+            data = JSON.parse(data)
+            let refreshToken = data["refresh_token"]
+            if (refreshToken) {
+                lk.setVal(aliYunPanRefreshTokenKey, refreshToken)
+                lk.appendNotifyInfo('🎉成功获取阿里云盘refresh_token，可以关闭相应脚本')
+            } else {
+                lk.execFail()
+                lk.appendNotifyInfo('❌获取阿里云盘token失败，请稍后再试')
             }
+        } catch (e) {
+            lk.execFail()
+            lk.appendNotifyInfo('❌获取阿里云盘token失败')
         }
-        lk.get(super_url, (error, response, data) => {
-            lk.log(`\n${JSON.stringify(data)}`);
+        lk.msg('')
+    }
+}
+
+async function all() {
+    let hasNeedSendNotify = true
+    if (aliYunPanRefreshToken == '') {
+        lk.execFail()
+        lk.appendNotifyInfo(`⚠️请先打开阿里云盘登录获取refresh_token`)
+    } else {
+        await refreshToken()
+        let hasAlreadySignIn = await signIn()
+        await joinTeam()
+    }
+    if (hasNeedSendNotify) {
+        lk.msg(``)
+    }
+    lk.done()
+}
+
+function refreshToken() {
+    return new Promise((resolve, _reject) => {
+        const t = '获取token'
+        let url = {
+            url: 'https://auth.aliyundrive.com/v2/account/token',
+            headers: {
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            body: JSON.stringify({
+                "grant_type": "refresh_token",
+                "app_id": "pJZInNHN2dZWk8qg",
+                "refresh_token": aliYunPanRefreshToken
+            })
+        }
+        lk.post(url, (error, _response, data) => {
             try {
                 if (error) {
                     lk.execFail()
-                    lk.appendNotifyInfo(`【${name}】超话签到错误！-${error}`)
+                    lk.appendNotifyInfo(`❌${t}失败，请稍后再试`)
                 } else {
-                    var obj = JSON.parse(data);
-                    var code = obj.code;
-                    var msg = obj.msg;
-                    if (code == 100003) { // 行为异常，需要重新验证
-                        lk.execFail()
-                        lk.appendNotifyInfo(`【${name}】超话签到❕${msg}${obj.data.location}`)
-                    } else if (code == 100000) {
-                        let tipMessage = obj.data.tipMessage;
-                        let alert_title = obj.data.alert_title;
-                        let alert_subtitle = obj.data.alert_subtitle;
-                        lk.appendNotifyInfo(`【${name}】超话签到成功🎉\n${alert_title}:${alert_subtitle}`)
-                    } else if (code == 382004) {
-                        msg = msg.replace("(382004)", "")
-                        lk.appendNotifyInfo(`【${name}】超话${msg} 🎉`)
+                    let dataObj = JSON.parse(data)
+                    if (dataObj.hasOwnProperty("refresh_token")) {
+                        aliYunPanToken = `Bearer ${dataObj["access_token"]}`
+                        aliYunPanRefreshToken = dataObj["refresh_token"]
+                        lk.setVal(aliYunPanTokenKey, aliYunPanToken)
+                        lk.setVal(aliYunPanRefreshTokenKey, aliYunPanRefreshToken)
                     } else {
                         lk.execFail()
-                        lk.appendNotifyInfo(`【${name}】超话签到${msg}`)
+                        lk.appendNotifyInfo(dataObj.message)
                     }
                 }
             } catch (e) {
                 lk.logErr(e)
+                lk.log(`阿里云盘${t}返回数据：${data}`)
                 lk.execFail()
-                lk.appendNotifyInfo(`签到失败❌，请重新获取cookie！`)
+                lk.appendNotifyInfo(`❌${t}错误，请带上日志联系作者，或稍后再试`)
+            } finally {
+                resolve()
+            }
+        })
+    })
+}
+
+function getReward(day) {
+    return new Promise((resolve, _reject) => {
+        const t = '领取奖励'
+        let url = {
+            url: 'https://member.aliyundrive.com/v1/activity/sign_in_reward?_rx-s=mobile',
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: aliYunPanToken,
+                "User-Agent": lk.userAgent
+            },
+            body: JSON.stringify({
+                "signInDay": day
+            })
+        }
+        lk.post(url, (error, _response, data) => {
+            try {
+                if (error) {
+                    lk.execFail()
+                    lk.appendNotifyInfo(`❌第${day}天${t}失败，请稍后再试`)
+                } else {
+                    lk.log(data)
+                    let dataObj = JSON.parse(data)
+                    if (dataObj.success) {
+                        lk.appendNotifyInfo(`✓${t}(第${day}天)，${dataObj?.result?.notice}`)
+                    } else {
+                        lk.execFail()
+                        lk.appendNotifyInfo(`❌第${day}天${t}失败，${dataObj.message}`)
+                    }
+                }
+            } catch (e) {
+                lk.logErr(e)
+                lk.log(`阿里云盘${t}返回数据：${data}`)
+                lk.execFail()
+                lk.appendNotifyInfo(`❌第${day}天${t}错误，请带上日志联系作者，或稍后再试`)
+            } finally {
+                resolve()
+            }
+        })
+    })
+}
+
+function doJoinTeam(joinTeamId) {
+    return new Promise(async (resolve, _reject) => {
+        const t = '加入队伍'
+        let url = {
+            url: 'https://member.aliyundrive.com/v1/activity/sign_in_team_pk?_rx-s=mobile',
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: aliYunPanToken,
+                "User-Agent": lk.userAgent
+            },
+            body: JSON.stringify({
+                id: joinTeamId,
+                team: "blue"
+            })
+        }
+        lk.post(url, async (error, _response, data) => {
+            try {
+                if (error) {
+                    lk.execFail()
+                    lk.appendNotifyInfo(`❌${t}失败，请稍后再试`)
+                } else {
+                    let dataObj = JSON.parse(data)
+                    if (!dataObj.success) {
+                        lk.execFail()
+                        lk.prependNotifyInfo(dataObj.message)
+                    }
+                }
+            } catch (e) {
+                lk.logErr(e)
+                lk.log(`阿里云盘${t}返回数据：${data}`)
+                lk.execFail()
+                lk.appendNotifyInfo(`❌${t}错误，请带上日志联系作者，或稍后再试`)
+            } finally {
+                resolve()
+            }
+        })
+    })
+}
+
+function joinTeam(layer = 0) {
+    return new Promise(async (resolve, _reject) => {
+        let firstDayOfYear = new Date(lk.now.getFullYear(), 0, 1)
+        const weekOfYear = Math.ceil((Math.round((lk.now.valueOf() - firstDayOfYear.valueOf()) / 86400000) + ((firstDayOfYear.getDay() + 1) - 1)) / 7)
+        // if (joinTeamRepeat == weekOfYear) {
+        // }
+        const t = '加入PK'
+        let url = {
+            url: 'https://member.aliyundrive.com/v1/activity/sign_in_team?_rx-s=mobile',
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: aliYunPanToken,
+                "User-Agent": lk.userAgent
+            },
+            body: JSON.stringify({})
+        }
+        lk.post(url, async (error, _response, data) => {
+            try {
+                if (error) {
+                    lk.execFail()
+                    lk.appendNotifyInfo(`❌${t}失败，请稍后再试`)
+                } else {
+                    let dataObj = JSON.parse(data)
+                    if (dataObj.success) {
+                        let joinedTeam = dataObj?.result?.joinTeam
+                        let joinTeamId = dataObj?.result?.id
+                        if (joinedTeam && joinTeamId) {
+                            lk.appendNotifyInfo(`🎉${t}成功\n${dataObj?.result?.period}：${dataObj?.result?.joinCount}(${dataObj?.result[joinedTeam + "WinRate"]})`)
+                            lk.setVal(joinTeamRepeatKey, JSON.stringify(weekOfYear))
+                        } else {
+                            if (layer === 0) {
+                                await doJoinTeam(joinTeamId)
+                                await joinTeam(++layer)
+                            } else {
+                                lk.log(`请求加入队伍异常：${data}`)
+                            }
+                        }
+                    } else {
+                        lk.execFail()
+                        lk.prependNotifyInfo(dataObj.message)
+                    }
+                }
+            } catch (e) {
+                lk.logErr(e)
+                lk.log(`阿里云盘${t}返回数据：${data}`)
+                lk.execFail()
+                lk.appendNotifyInfo(`❌${t}错误，请带上日志联系作者，或稍后再试`)
+            } finally {
+                resolve()
+            }
+        })
+    })
+}
+
+function signIn() {
+    return new Promise(async (resolve, _reject) => {
+        let nowString = lk.formatDate(new Date(), 'yyyyMMdd')
+        if (nowString == checkSignInRepeat) {
+            lk.prependNotifyInfo('今日已经签到，无法重复签到～～')
+            resolve(1)
+            return
+        }
+        const t = '签到'
+        let url = {
+            url: 'https://member.aliyundrive.com/v1/activity/sign_in_list',
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: aliYunPanToken,
+                "User-Agent": lk.userAgent
+            },
+            body: JSON.stringify({})
+        }
+        lk.post(url, async (error, _response, data) => {
+            try {
+                if (error) {
+                    lk.execFail()
+                    lk.appendNotifyInfo(`❌${t}失败，请稍后再试`)
+                } else {
+                    let dataObj = JSON.parse(data)
+                    if (dataObj.success) {
+                        let prefix = ""
+                        if (dataObj?.result?.signInLogs.length > 0) {
+                            for (const l of dataObj.result.signInLogs) {
+                                if (l?.status != "miss") {
+                                    prefix = `第${l?.day}天`
+                                    if (!l?.isReward) {
+                                        await getReward(l?.day)
+                                    }
+                                }
+                            }
+                        }
+                        lk.prependNotifyInfo(`🎉${prefix}${t}成功`)
+                        lk.setVal(checkSignInRepeatKey, nowString)
+                    } else {
+                        lk.execFail()
+                        lk.prependNotifyInfo(dataObj.message)
+                    }
+                }
+            } catch (e) {
+                lk.logErr(e)
+                lk.log(`阿里云盘${t}返回数据：${data}`)
+                lk.execFail()
+                lk.appendNotifyInfo(`❌${t}错误，请带上日志联系作者，或稍后再试`)
             } finally {
                 resolve()
             }
